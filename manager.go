@@ -39,7 +39,7 @@ func (tm *TimerManager) getOrAllocBucket(endTime int64) (bucketId int) {
 	return bucketId
 }
 
-func (tm *TimerManager) addTimer(d time.Duration, isRepeat bool, f TimerHandler, a ...any) TimerID {
+func (tm *TimerManager) addTimer(d time.Duration, isRepeat bool, f TimerHandler, canceler *Canceler, a ...any) TimerID {
 	if d <= 0 {
 		panic("timer duration <= 0")
 	}
@@ -51,28 +51,35 @@ func (tm *TimerManager) addTimer(d time.Duration, isRepeat bool, f TimerHandler,
 
 	timerID := tm.listEntryPool.Alloc()
 	te := &tm.listEntryPool.Arr[timerID]
+	gen := te.gen + 1
 	*te = timerListEntry{
 		timer: timer{
 			end:      endTime,
 			interval: d.Milliseconds(),
 			repeat:   isRepeat,
+			isCancel: false,
 			callback: f,
 			args:     a,
 		},
 		timerID: timerID,
+		gen:     gen,
 	}
 
 	be.push(te) //这里te会逃逸吗？
 
+	if canceler != nil {
+		canceler.register(te.timerID, te.gen)
+	}
+
 	return timerID
 }
 
-func (tm *TimerManager) AddTimer(d time.Duration, f TimerHandler, a ...any) TimerID {
-	return tm.addTimer(d, false, f, a...)
+func (tm *TimerManager) AddTimer(d time.Duration, f TimerHandler, canceler *Canceler, a ...any) TimerID {
+	return tm.addTimer(d, false, f, canceler, a...)
 }
 
-func (tm *TimerManager) AddRepeatTimer(d time.Duration, f TimerHandler, a ...any) TimerID {
-	return tm.addTimer(d, true, f, a...)
+func (tm *TimerManager) AddRepeatTimer(d time.Duration, f TimerHandler, canceler *Canceler, a ...any) TimerID {
+	return tm.addTimer(d, true, f, canceler, a...)
 }
 
 func (tm *TimerManager) execTimer(timerID TimerID) time.Duration {
@@ -146,4 +153,8 @@ func (tm *TimerManager) CancelTimer(timerID TimerID) {
 		return
 	}
 	te.cancel()
+}
+
+func (tm *TimerManager) NewCanceler() *Canceler {
+	return &Canceler{timerMgr: tm}
 }
