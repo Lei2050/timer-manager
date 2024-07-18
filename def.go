@@ -1,7 +1,7 @@
 package timermgr
 
 const (
-	initCap            = 64
+	initCap            = 16
 	maxExecTimePerTick = 50 //每次tick的最大运行时间(ms)，用于平滑
 )
 
@@ -12,5 +12,5 @@ func encodeTimerID(idx, gen int) TimerID {
 }
 
 func decodeTimerID(uid TimerID) (idx, gen int) {
-	return int(uid), int(uid >> 32)
+	return int(uid & 0x0000ffff), int(uid >> 32)
 }

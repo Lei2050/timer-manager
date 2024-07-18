@@ -2,6 +2,7 @@ package timermgr
 
 import (
 	"container/heap"
+	"fmt"
 	"time"
 )
 
@@ -18,14 +19,13 @@ type TimerManager struct {
 
 func New() *TimerManager {
 	tm := &TimerManager{
-		pq:          make(priorityQueue, initCap),
+		pq:          make(priorityQueue, 0, initCap),
 		time2Bucket: make(map[int64]int, initCap),
 		timerPool:   make([]timerListEntry, initCap),
 
 		bucketEntryPool: NewPool[bucketEntry](initCap),
 		listEntryPool:   NewPool[timerListEntry](initCap),
 	}
-	tm.listEntryPool.Alloc() //idx=0的元素不用，一般地id=0表示无效
 	return tm
 }
 
@@ -33,6 +33,7 @@ func (tm *TimerManager) getOrAllocBucket(endTime int64) (bucketId int) {
 	bucketId, exist := tm.time2Bucket[endTime]
 	if !exist {
 		bucketId = tm.bucketEntryPool.Alloc()
+		tm.bucketEntryPool.Arr[bucketId] = bucketEntry{}
 		tm.time2Bucket[endTime] = bucketId
 		heap.Push(&tm.pq, endTime)
 	}
@@ -44,6 +45,7 @@ func (tm *TimerManager) addTimer(d time.Duration, isRepeat bool, f TimerHandler,
 		panic("timer duration <= 0")
 	}
 
+	// nowMilliSec := time.Now().UnixMilli()
 	endTime := time.Now().UnixMilli() + d.Milliseconds()
 	bucketId := tm.getOrAllocBucket(endTime)
 
@@ -65,7 +67,9 @@ func (tm *TimerManager) addTimer(d time.Duration, isRepeat bool, f TimerHandler,
 		gen: gen,
 	}
 
-	be.push(te) //这里te会逃逸吗？
+	// fmt.Printf("now:%d, endTime:%d, bucketId:%d, idx:%d, gen:%d, args:%+v\n", nowMilliSec, endTime, bucketId, idx, gen, a)
+
+	be.push(te) //这里te会逃逸吗？不会
 
 	timerID := encodeTimerID(te.idx, te.gen)
 	if canceler != nil {
@@ -84,6 +88,12 @@ func (tm *TimerManager) AddRepeatTimer(d time.Duration, f TimerHandler, canceler
 }
 
 func (tm *TimerManager) execTimer(idx int) time.Duration {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("execTimer err:%+v\n", err)
+		}
+	}()
+
 	te := &tm.listEntryPool.Arr[idx]
 	if te.isCancel {
 		return 0
@@ -96,14 +106,16 @@ func (tm *TimerManager) execTimer(idx int) time.Duration {
 
 func (tm *TimerManager) repeatTimer(idx int) {
 	te := &tm.listEntryPool.Arr[idx]
-	bucketId := tm.getOrAllocBucket(te.end + te.interval)
+	te.end = te.end + te.interval
+	bucketId := tm.getOrAllocBucket(te.end)
 	be := &tm.bucketEntryPool.Arr[bucketId]
 	be.push(te)
+	// fmt.Printf("end:%d, interval:%d, bucketId:%d, idx:%d\n", te.end, te.interval, bucketId, idx)
 }
 
 func (tm *TimerManager) execPendingTimer() bool {
 	var cumulCost time.Duration
-	for _, idx := range tm.pendingExec {
+	for i, idx := range tm.pendingExec {
 		cumulCost += tm.execTimer(idx)
 		if tm.listEntryPool.Arr[idx].repeat {
 			tm.repeatTimer(idx)
@@ -111,9 +123,11 @@ func (tm *TimerManager) execPendingTimer() bool {
 			tm.listEntryPool.Free(idx)
 		}
 		if maxExecTimePerTick > 0 && cumulCost.Milliseconds() > maxExecTimePerTick {
+			tm.pendingExec = tm.pendingExec[i+1:]
 			return false
 		}
 	}
+	tm.pendingExec = tm.pendingExec[:0]
 	return true
 }
 
@@ -139,8 +153,12 @@ func (tm *TimerManager) Tick(now time.Time) {
 		timerEntryIdx := be.timerListEntryIdx
 		for timerEntryIdx > 0 {
 			tm.pendingExec = append(tm.pendingExec, timerEntryIdx)
-			timerEntryIdx = tm.listEntryPool.Arr[timerEntryIdx].next
+			next := tm.listEntryPool.Arr[timerEntryIdx].next
+			tm.listEntryPool.Arr[timerEntryIdx].next = 0 //断开链表
+			timerEntryIdx = next
 		}
+		// fmt.Printf("free bucket:%d\n", bucketId)
+		delete(tm.time2Bucket, onTime)
 		tm.bucketEntryPool.Free(bucketId)
 
 		if !tm.execPendingTimer() {
