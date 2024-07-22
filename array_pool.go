@@ -3,7 +3,7 @@ package timermgr
 import "fmt"
 
 type ArrayPool[T any] struct {
-	Arr   []T //Arr[0]是哨兵（sentinel），不会分配出去
+	arr   []T //Arr[0]是哨兵（sentinel），不会分配出去
 	alloc int //下一次分配哪个
 	// free  []int
 	free map[int]struct{}
@@ -18,21 +18,21 @@ func NewPool[T any](cap int) *ArrayPool[T] {
 	}
 	cap++
 	return &ArrayPool[T]{
-		Arr:   make([]T, cap),
+		arr:   make([]T, cap),
 		alloc: 1,
 		free:  make(map[int]struct{}),
 	}
 }
 
 func (ap *ArrayPool[T]) grow() {
-	newArray := make([]T, len(ap.Arr)*2) //TODO
-	copy(newArray, ap.Arr)
-	ap.Arr = newArray
+	newArray := make([]T, len(ap.arr)*2) //TODO
+	copy(newArray, ap.arr)
+	ap.arr = newArray
 }
 
 // return >=1
 func (ap *ArrayPool[T]) Alloc() int {
-	if ap.alloc < len(ap.Arr) {
+	if ap.alloc < len(ap.arr) {
 		id := ap.alloc
 		ap.alloc++
 		return id
@@ -60,7 +60,7 @@ func (ap *ArrayPool[T]) Free(id int) {
 		panic(fmt.Errorf("free invalid id:%d, next alloc pos:%d", id, ap.alloc))
 	}
 
-	ap.Arr[id] = ap.Arr[0] //重置为零值，防止内存泄露
+	ap.arr[id] = ap.arr[0] //重置为零值，防止内存泄露
 
 	if id == ap.alloc-1 {
 		ap.alloc--
@@ -77,9 +77,9 @@ func (ap *ArrayPool[T]) Free(id int) {
 }
 
 func (ap *ArrayPool[T]) Get(id int) T {
-	return ap.Arr[id]
+	return ap.arr[id]
 }
 
 func (ap *ArrayPool[T]) GetRef(id int) *T {
-	return &ap.Arr[id]
+	return &ap.arr[id]
 }

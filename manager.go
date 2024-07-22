@@ -33,7 +33,6 @@ func (tm *TimerManager) getOrAllocBucket(endTime int64) (bucketId int) {
 	bucketId, exist := tm.time2Bucket[endTime]
 	if !exist {
 		bucketId = tm.bucketEntryPool.Alloc()
-		tm.bucketEntryPool.Arr[bucketId] = bucketEntry{}
 		tm.time2Bucket[endTime] = bucketId
 		heap.Push(&tm.pq, endTime)
 	}
@@ -49,10 +48,10 @@ func (tm *TimerManager) addTimer(d time.Duration, isRepeat bool, f TimerHandler,
 	endTime := time.Now().UnixMilli() + d.Milliseconds()
 	bucketId := tm.getOrAllocBucket(endTime)
 
-	be := &tm.bucketEntryPool.Arr[bucketId]
+	be := tm.bucketEntryPool.GetRef(bucketId)
 
 	idx := tm.listEntryPool.Alloc()
-	te := &tm.listEntryPool.Arr[idx]
+	te := tm.listEntryPool.GetRef(idx)
 	gen := te.gen + 1
 	*te = timerListEntry{
 		timer: timer{
@@ -94,7 +93,7 @@ func (tm *TimerManager) execTimer(idx int) time.Duration {
 		}
 	}()
 
-	te := &tm.listEntryPool.Arr[idx]
+	te := tm.listEntryPool.GetRef(idx)
 	if te.isCancel {
 		return 0
 	}
@@ -105,10 +104,10 @@ func (tm *TimerManager) execTimer(idx int) time.Duration {
 }
 
 func (tm *TimerManager) repeatTimer(idx int) {
-	te := &tm.listEntryPool.Arr[idx]
+	te := tm.listEntryPool.GetRef(idx)
 	te.end = te.end + te.interval
 	bucketId := tm.getOrAllocBucket(te.end)
-	be := &tm.bucketEntryPool.Arr[bucketId]
+	be := tm.bucketEntryPool.GetRef(bucketId)
 	be.push(te)
 	// fmt.Printf("end:%d, interval:%d, bucketId:%d, idx:%d\n", te.end, te.interval, bucketId, idx)
 }
@@ -117,7 +116,7 @@ func (tm *TimerManager) execPendingTimer() bool {
 	var cumulCost time.Duration
 	for i, idx := range tm.pendingExec {
 		cumulCost += tm.execTimer(idx)
-		if tm.listEntryPool.Arr[idx].repeat {
+		if tm.listEntryPool.GetRef(idx).repeat {
 			tm.repeatTimer(idx)
 		} else {
 			tm.listEntryPool.Free(idx)
@@ -149,12 +148,13 @@ func (tm *TimerManager) Tick(now time.Time) {
 
 		onTime := heap.Pop(&tm.pq).(int64)
 		bucketId := tm.time2Bucket[onTime]
-		be := &tm.bucketEntryPool.Arr[bucketId]
+		be := tm.bucketEntryPool.GetRef(bucketId)
 		timerEntryIdx := be.timerListEntryIdx
 		for timerEntryIdx > 0 {
 			tm.pendingExec = append(tm.pendingExec, timerEntryIdx)
-			next := tm.listEntryPool.Arr[timerEntryIdx].next
-			tm.listEntryPool.Arr[timerEntryIdx].next = 0 //断开链表
+			cur := tm.listEntryPool.GetRef(timerEntryIdx)
+			next := cur.next
+			cur.next = 0 //断开链表
 			timerEntryIdx = next
 		}
 		// fmt.Printf("free bucket:%d\n", bucketId)
@@ -169,7 +169,7 @@ func (tm *TimerManager) Tick(now time.Time) {
 
 func (tm *TimerManager) CancelTimer(timerID TimerID) {
 	idx, gen := decodeTimerID(timerID)
-	te := &tm.listEntryPool.Arr[idx]
+	te := tm.listEntryPool.GetRef(idx)
 	if gen != te.gen {
 		//说明该timer之前被回收并复用了，当前Canceler持有的是个失效的
 		return
