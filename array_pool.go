@@ -24,8 +24,18 @@ func NewPool[T any](cap int) *ArrayPool[T] {
 	}
 }
 
+func (ap *ArrayPool[T]) nextCap(oldCap int) int {
+	doubleCap := oldCap + oldCap
+	const threshold = 256
+	if oldCap < threshold {
+		return doubleCap
+	}
+	return oldCap + ((oldCap + 3*threshold) >> 2)
+}
+
 func (ap *ArrayPool[T]) grow() {
-	newArray := make([]T, len(ap.arr)*2) //TODO
+	newCap := ap.nextCap(len(ap.arr))
+	newArray := make([]T, newCap)
 	copy(newArray, ap.arr)
 	ap.arr = newArray
 }
