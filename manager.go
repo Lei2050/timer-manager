@@ -9,7 +9,6 @@ import (
 type TimerManager struct {
 	pq          priorityQueue
 	time2Bucket map[int64]int
-	timerPool   []timerListEntry
 
 	bucketEntryPool *ArrayPool[bucketEntry]
 	listEntryPool   *ArrayPool[timerListEntry]
@@ -21,7 +20,6 @@ func New() *TimerManager {
 	tm := &TimerManager{
 		pq:          make(priorityQueue, 0, initCap),
 		time2Bucket: make(map[int64]int, initCap),
-		timerPool:   make([]timerListEntry, initCap),
 
 		bucketEntryPool: NewPool[bucketEntry](initCap),
 		listEntryPool:   NewPool[timerListEntry](initCap),
