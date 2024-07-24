@@ -1,28 +1,30 @@
 package timermgr
 
 import (
-	"container/heap"
 	"fmt"
 	"time"
+
+	arraypool "github.com/Lei2050/array-pool"
+	priorityqueue "github.com/Lei2050/priority-queue"
 )
 
 type TimerManager struct {
-	pq          priorityQueue
+	pq          *priorityqueue.BasicTypePriorityQueue[int64]
 	time2Bucket map[int64]int
 
-	bucketEntryPool *ArrayPool[bucketEntry]
-	listEntryPool   *ArrayPool[timerListEntry]
+	bucketEntryPool *arraypool.ArrayPool[bucketEntry]
+	listEntryPool   *arraypool.ArrayPool[timerListEntry]
 
 	pendingExec []int
 }
 
 func New() *TimerManager {
 	tm := &TimerManager{
-		pq:          make(priorityQueue, 0, initCap),
+		pq:          priorityqueue.NewBasicTypePQ[int64](initCap),
 		time2Bucket: make(map[int64]int, initCap),
 
-		bucketEntryPool: NewPool[bucketEntry](initCap),
-		listEntryPool:   NewPool[timerListEntry](initCap),
+		bucketEntryPool: arraypool.New[bucketEntry](initCap),
+		listEntryPool:   arraypool.New[timerListEntry](initCap),
 	}
 	return tm
 }
@@ -32,7 +34,7 @@ func (tm *TimerManager) getOrAllocBucket(endTime int64) (bucketId int) {
 	if !exist {
 		bucketId = tm.bucketEntryPool.Alloc()
 		tm.time2Bucket[endTime] = bucketId
-		heap.Push(&tm.pq, endTime)
+		tm.pq.Push(endTime)
 	}
 	return bucketId
 }
@@ -138,13 +140,13 @@ func (tm *TimerManager) Tick(now time.Time) {
 	}
 
 	for tm.pq.Len() > 0 {
-		headTime := tm.pq[0]
+		headTime := tm.pq.Peek()
 		nowt := now.UnixMilli()
 		if headTime > nowt {
 			break
 		}
 
-		onTime := heap.Pop(&tm.pq).(int64)
+		onTime := tm.pq.Pop()
 		bucketId := tm.time2Bucket[onTime]
 		be := tm.bucketEntryPool.GetRef(bucketId)
 		timerEntryIdx := be.timerListEntryIdx
